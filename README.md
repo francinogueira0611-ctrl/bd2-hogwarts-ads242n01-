@@ -8,6 +8,7 @@
 ## Aluno
 
 | Nome | Matrícula | Usuário do GitHub |
+|---|---|---|
 | Franciane Nogueira | 2418640 | francinogueira0611-ctrl |
 |  |  |  |
 
