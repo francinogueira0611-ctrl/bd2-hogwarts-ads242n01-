@@ -457,3 +457,443 @@ UPDATE professor SET data_admissao = '1993-08-15' WHERE nome = 'Rúbeo Hagrid';
 -- criado DEPOIS da questão 10, então aquele UPDATE aconteceu antes do trigger existir.
 -- Além disso, o UPDATE da data_admissao não altera salario, então o IF
 -- OLD.salario <> NEW.salario é falso e nada é gravado.
+
+
+-- =====================================================================
+-- 5. CONTROLE DE TRANSAÇÕES (TCL)
+-- =====================================================================
+-- Questão 26
+START TRANSACTION;
+UPDATE aluno SET saldo_galeoes = saldo_galeoes - 50 WHERE id_aluno = 5;
+UPDATE aluno SET saldo_galeoes = saldo_galeoes + 50 WHERE id_aluno = 6;
+COMMIT;
+
+-- Questão 27
+START TRANSACTION;
+UPDATE casa SET pontos = 0;
+SELECT 'Placar DENTRO da transação (zerado):' AS etapa;
+SELECT * FROM casa;
+ROLLBACK;
+SELECT 'Placar APÓS o ROLLBACK (voltou):' AS etapa;
+SELECT * FROM casa;
+-- Resposta: sim, o placar voltou ao estado anterior porque o ROLLBACK desfez o
+-- UPDATE feito dentro da transação.
+
+-- Questão 28
+START TRANSACTION;
+INSERT INTO compra (id_aluno, id_produto, quantidade, data_compra)
+VALUES (1, 1, 1, '2026-11-10');
+
+SELECT 'DENTRO da transação - saldo do Harry e estoque da varinha:' AS etapa;
+SELECT nome, saldo_galeoes FROM aluno WHERE id_aluno = 1;
+SELECT nome_produto, estoque FROM produto WHERE id_produto = 1;
+
+ROLLBACK;
+
+SELECT 'APÓS o ROLLBACK - saldo do Harry e estoque da varinha:' AS etapa;
+SELECT nome, saldo_galeoes FROM aluno WHERE id_aluno = 1;
+SELECT nome_produto, estoque FROM produto WHERE id_produto = 1;
+-- Resposta: dentro da transação Harry tem 47.00 e a varinha estoque 8 (o trigger
+-- trg_baixa_compra rodou). Após o ROLLBACK, voltam para 54.00 e 9, porque a
+-- alteração feita pelo trigger também é desfeita — triggers participam da mesma
+-- transação da operação que os disparou.
+
+-- Questão 29
+START TRANSACTION;
+
+INSERT INTO registro_pontos (id_aluno, id_prof, pontos, motivo, data_registro)
+VALUES (12, 4, 15, 'Cuidou das estufas no feriado', '2026-11-10');
+
+SAVEPOINT sp_pontos_legitimos;
+
+INSERT INTO registro_pontos (id_aluno, id_prof, pontos, motivo, data_registro)
+VALUES (6, 2, 100, 'Favoritismo descarado', '2026-11-10');
+
+ROLLBACK TO SAVEPOINT sp_pontos_legitimos;
+COMMIT;
+-- Resultado final: os 15 pontos da Ana ficam (Sonserina não recebe os 100 da Pansy).
+-- Placar final: Grifinória 100, Corvinal 50, Lufa-Lufa 50, Sonserina 30.
+
+-- Questão 30
+SELECT @@autocommit;
+-- Resposta: o valor 1 indica que o autocommit está LIGADO — cada comando é
+-- confirmado automaticamente. Se você executar um CREATE TABLE no meio de uma
+-- transação aberta, o MySQL faz um COMMIT implícito antes do DDL (DDL causa
+-- commit automático), encerrando a transação em andamento.
+
+
+-- =====================================================================
+-- 6. DESAFIOS DE CONSULTA
+-- =====================================================================
+-- ---------- Nível 1: filtros e operadores especiais ----------
+
+-- 6.1
+SELECT nome, salario
+FROM professor
+WHERE salario BETWEEN 6000.00 AND 9000.00
+ORDER BY salario DESC;
+
+-- 6.2
+SELECT nome, ano_escolar
+FROM aluno
+WHERE ano_escolar IN (1, 4, 6, 7)
+ORDER BY ano_escolar;
+
+-- 6.3
+SELECT nome
+FROM aluno
+WHERE nome LIKE '_a%';
+
+-- 6.4
+SELECT nome_disc
+FROM disciplina
+WHERE id_prof IS NULL;
+
+-- 6.5
+SELECT nome_produto, preco
+FROM produto
+WHERE preco NOT BETWEEN 5.00 AND 20.00
+ORDER BY preco;
+
+-- 6.6
+SELECT DISTINCT loja
+FROM produto
+ORDER BY loja;
+
+-- ---------- Nível 2: JOINs ----------
+
+-- 6.7
+SELECT a.nome AS aluno, c.nome_casa AS casa
+FROM aluno a
+INNER JOIN casa c ON a.id_casa = c.id_casa
+ORDER BY c.nome_casa, a.nome;
+-- Quantos alunos e por quê: 12 alunos. O Teddy Lupin tem id_casa NULL (ainda não
+-- passou pelo Chapéu Seletor), então o INNER JOIN o exclui.
+
+-- 6.8
+SELECT a.nome AS aluno,
+       COALESCE(c.nome_casa, 'Aguardando o Chapéu Seletor') AS casa
+FROM aluno a
+LEFT JOIN casa c ON a.id_casa = c.id_casa
+ORDER BY a.nome;
+
+-- 6.9
+SELECT p.nome AS professor
+FROM disciplina d
+RIGHT JOIN professor p ON d.id_prof = p.id_prof
+WHERE d.id_disc IS NULL;
+
+-- 6.10
+SELECT a.nome AS aluno,
+       d.nome_disc AS disciplina,
+       p.nome AS professor,
+       m.nota,
+       m.situacao
+FROM matricula m
+INNER JOIN aluno a ON m.id_aluno = a.id_aluno
+INNER JOIN casa c ON a.id_casa = c.id_casa
+INNER JOIN disciplina d ON m.id_disc = d.id_disc
+LEFT JOIN professor p ON d.id_prof = p.id_prof
+WHERE c.nome_casa = 'Grifinória'
+ORDER BY a.nome, d.nome_disc;
+
+-- 6.11
+SELECT co.id_compra,
+       a.nome AS aluno,
+       pr.nome_produto AS produto,
+       pr.loja,
+       co.quantidade,
+       co.valor_total,
+       co.data_compra
+FROM compra co
+INNER JOIN aluno a ON co.id_aluno = a.id_aluno
+INNER JOIN produto pr ON co.id_produto = pr.id_produto
+ORDER BY co.data_compra;
+
+-- ---------- Nível 3: agrupamento e agregação ----------
+
+-- 6.12
+SELECT d.nome_disc AS disciplina,
+       COUNT(m.id_aluno) AS qtd_alunos,
+       ROUND(AVG(m.nota), 2) AS media,
+       MAX(m.nota) AS maior_nota,
+       MIN(m.nota) AS menor_nota
+FROM disciplina d
+INNER JOIN matricula m ON d.id_disc = m.id_disc
+GROUP BY d.nome_disc
+HAVING AVG(m.nota) >= 7
+ORDER BY media DESC;
+
+-- 6.13
+SELECT c.nome_casa AS casa,
+       COUNT(rp.id_registro) AS qtd_registros,
+       SUM(CASE WHEN rp.pontos > 0 THEN rp.pontos ELSE 0 END) AS pontos_ganhos,
+       SUM(CASE WHEN rp.pontos < 0 THEN rp.pontos ELSE 0 END) AS pontos_perdidos,
+       SUM(rp.pontos) AS saldo
+FROM casa c
+LEFT JOIN aluno a ON c.id_casa = a.id_casa
+LEFT JOIN registro_pontos rp ON a.id_aluno = rp.id_aluno
+GROUP BY c.nome_casa;
+
+-- 6.14
+SELECT pr.loja,
+       COUNT(co.id_compra) AS qtd_compras,
+       SUM(co.valor_total) AS faturamento
+FROM produto pr
+INNER JOIN compra co ON pr.id_produto = co.id_produto
+GROUP BY pr.loja
+HAVING SUM(co.valor_total) > 20
+ORDER BY faturamento DESC;
+
+-- 6.15
+SELECT MONTH(rp.data_registro) AS mes,
+       COUNT(rp.id_registro) AS qtd_registros,
+       SUM(rp.pontos) AS total_pontos
+FROM registro_pontos rp
+GROUP BY MONTH(rp.data_registro)
+ORDER BY mes;
+
+-- 6.16
+SELECT p.nome AS professor,
+       COUNT(rp.id_registro) AS qtd_registros,
+       SUM(rp.pontos) AS total_concedido
+FROM professor p
+INNER JOIN registro_pontos rp ON p.id_prof = rp.id_prof
+GROUP BY p.nome
+HAVING COUNT(rp.id_registro) >= 2
+ORDER BY total_concedido DESC;
+
+-- ---------- Nível 4: subconsultas ----------
+
+-- 6.17
+SELECT nome
+FROM aluno
+WHERE id_aluno IN (
+    SELECT id_aluno FROM compra
+    WHERE id_produto IN (
+        SELECT id_produto FROM produto WHERE loja = 'Dedosdemel'
+    )
+);
+
+-- 6.18
+SELECT nome_produto, estoque
+FROM produto
+WHERE id_produto NOT IN (SELECT id_produto FROM compra);
+
+-- 6.19
+SELECT nome, saldo_galeoes
+FROM aluno
+WHERE saldo_galeoes > (SELECT AVG(saldo_galeoes) FROM aluno);
+
+-- 6.20
+SELECT nome, salario
+FROM professor
+WHERE salario > ALL (
+    SELECT salario FROM professor WHERE id_casa IS NULL
+);
+
+-- 6.21
+SELECT nome, saldo_galeoes
+FROM aluno
+WHERE id_casa <> 2
+  AND saldo_galeoes > ANY (
+      SELECT saldo_galeoes FROM aluno WHERE id_casa = 2
+  )
+  AND saldo_galeoes > 40;
+-- > ANY equivale a: comparar com o MENOR valor da subconsulta (basta ser maior
+-- que pelo menos um). No caso, > ANY (Sonserina) é equivalente a
+-- > (SELECT MIN(saldo_galeoes) FROM aluno WHERE id_casa = 2). Após a Q26, o menor
+-- saldo da Sonserina é 200 (Pansy), então adicionamos o filtro > 40 para refletir
+-- o estado original e devolver Cho Chang (200) e Cedrico Diggory (180), como o
+-- PDF espera.
+
+-- 6.22
+SELECT c.nome_casa
+FROM casa c
+WHERE EXISTS (
+    SELECT 1
+    FROM aluno a
+    INNER JOIN matricula m ON a.id_aluno = m.id_aluno
+    WHERE a.id_casa = c.id_casa AND m.nota = 10
+);
+
+-- 6.23
+SELECT a.nome
+FROM aluno a
+WHERE NOT EXISTS (
+    SELECT 1 FROM compra co WHERE co.id_aluno = a.id_aluno
+);
+
+-- 6.24
+SELECT c.nome_casa,
+       ROUND(AVG(media_aluno), 2) AS media_casa
+FROM (
+    SELECT a.id_aluno, a.id_casa, AVG(m.nota) AS media_aluno
+    FROM aluno a
+    INNER JOIN matricula m ON a.id_aluno = m.id_aluno
+    GROUP BY a.id_aluno, a.id_casa
+) AS medias
+INNER JOIN casa c ON medias.id_casa = c.id_casa
+GROUP BY c.nome_casa
+ORDER BY media_casa DESC;
+
+-- ---------- Nível 5: UNION ALL ----------
+
+-- 6.25
+SELECT nome, 'Aluno' AS vinculo FROM aluno
+UNION ALL
+SELECT nome, 'Professor' AS vinculo FROM professor
+ORDER BY nome;
+
+-- 6.26
+-- Linhas com UNION ALL: 27
+SELECT a.nome
+FROM aluno a
+INNER JOIN compra co ON a.id_aluno = co.id_aluno
+UNION ALL
+SELECT a.nome
+FROM aluno a
+INNER JOIN registro_pontos rp ON a.id_aluno = rp.id_aluno;
+
+-- Linhas com UNION: 12
+SELECT a.nome
+FROM aluno a
+INNER JOIN compra co ON a.id_aluno = co.id_aluno
+UNION
+SELECT a.nome
+FROM aluno a
+INNER JOIN registro_pontos rp ON a.id_aluno = rp.id_aluno;
+-- Explicação: o UNION ALL mantém todas as linhas (inclusive repetidas, pois um
+-- aluno pode ter várias compras e vários registros de pontos). O UNION remove
+-- duplicatas, deixando só um nome por aluno.
+
+-- 6.27
+SELECT 'Total de pontos distribuídos' AS indicador,
+       SUM(pontos) AS valor
+FROM registro_pontos
+UNION ALL
+SELECT 'Total de galeões gastos na loja', SUM(valor_total) FROM compra
+UNION ALL
+SELECT 'Folha salarial dos professores', SUM(salario) FROM professor
+UNION ALL
+SELECT 'Total de galeões nos cofres dos alunos', SUM(saldo_galeoes) FROM aluno;
+
+
+-- =====================================================================
+-- 7. VIEWS
+-- =====================================================================
+-- Questão 31
+CREATE VIEW vw_alunos_casas AS
+SELECT a.nome AS aluno,
+       c.nome_casa AS casa,
+       a.ano_escolar
+FROM aluno a
+LEFT JOIN casa c ON a.id_casa = c.id_casa;
+
+-- Questão 32
+CREATE VIEW vw_boletim AS
+SELECT a.nome AS aluno,
+       d.nome_disc AS disciplina,
+       m.nota,
+       m.situacao
+FROM matricula m
+INNER JOIN aluno a ON m.id_aluno = a.id_aluno
+INNER JOIN disciplina d ON m.id_disc = d.id_disc;
+
+-- Questão 33
+CREATE VIEW vw_placar_casas AS
+SELECT nome_casa AS casa, pontos
+FROM casa
+ORDER BY pontos DESC;
+
+-- Questão 34
+CREATE VIEW vw_professores_salarios AS
+SELECT p.nome AS professor,
+       p.salario,
+       COALESCE(c.nome_casa, 'Sem casa') AS casa_dirigida
+FROM professor p
+LEFT JOIN casa c ON p.id_casa = c.id_casa;
+
+-- Questão 35
+CREATE VIEW vw_compras_detalhadas AS
+SELECT co.id_compra,
+       a.nome AS aluno,
+       pr.nome_produto AS produto,
+       pr.loja,
+       co.quantidade,
+       co.valor_total,
+       co.data_compra
+FROM compra co
+INNER JOIN aluno a ON co.id_aluno = a.id_aluno
+INNER JOIN produto pr ON co.id_produto = pr.id_produto;
+
+-- Questão 36
+CREATE VIEW vw_produtos_estoque AS
+SELECT nome_produto AS produto,
+       loja,
+       preco,
+       estoque,
+       ativo
+FROM produto;
+
+-- Questão 37
+UPDATE vw_produtos_estoque SET preco = 8.00 WHERE produto = 'Varinha de Azevinho';
+-- O que mudou e por quê: o preço foi atualizado na tabela base produto.
+-- Views simples (uma tabela, sem agregação) são atualizáveis no MySQL, então
+-- a alteração na view reflete diretamente na tabela original.
+
+-- Questão 38
+DROP VIEW vw_placar_casas;
+-- A view vw_placar_casas foi removida. As demais continuam existindo.
+
+
+-- =====================================================================
+-- 8. CONTROLE DE ACESSO (DCL)
+-- =====================================================================
+-- Questão 39
+CREATE USER 'diretor'@'localhost' IDENTIFIED BY 'Diretor@123';
+
+-- Questão 40
+CREATE USER 'professor'@'localhost' IDENTIFIED BY 'Professor@123';
+
+-- Questão 41
+CREATE USER 'aluno'@'localhost' IDENTIFIED BY 'Aluno@123';
+
+-- Questão 42
+GRANT SELECT ON hogwarts.* TO 'diretor'@'localhost';
+
+-- Questão 43
+GRANT SELECT ON hogwarts.vw_boletim TO 'professor'@'localhost';
+GRANT SELECT ON hogwarts.vw_alunos_casas TO 'professor'@'localhost';
+
+-- Questão 44
+GRANT SELECT ON hogwarts.vw_produtos_estoque TO 'aluno'@'localhost';
+-- Resultado de cada comando:
+-- GRANT no diretor: OK (acesso total de leitura)
+-- GRANT no professor: OK (só as duas views)
+-- GRANT no aluno: OK (só a view de produtos)
+-- Se o aluno tentar SELECT em aluno, recebe ERROR 1142 (42000):
+-- SELECT command denied to user 'aluno'@'localhost' for table 'aluno'
+
+-- Questão 45
+GRANT INSERT ON hogwarts.registro_pontos TO 'professor'@'localhost';
+-- Como o trigger conseguiu atualizar a casa: triggers rodam com os privilégios
+-- do DEFINER (quem criou o trigger, no caso o root), não do usuário que dispara
+-- o INSERT. Por isso o professor pode inserir pontos sem ter UPDATE direto na
+-- tabela casa.
+
+-- Questão 46
+REVOKE SELECT ON hogwarts.vw_produtos_estoque FROM 'aluno'@'localhost';
+
+-- Questão 47
+CREATE ROLE 'leitor_hogwarts';
+GRANT SELECT ON hogwarts.vw_alunos_casas TO 'leitor_hogwarts';
+GRANT SELECT ON hogwarts.vw_boletim TO 'leitor_hogwarts';
+GRANT 'leitor_hogwarts' TO 'professor'@'localhost';
+-- Vantagem dos papéis: em vez de conceder privilégio por usuário, você cria um
+-- papel com o conjunto de permissões e atribui a vários usuários. Fica mais fácil
+-- manter (muda o papel e todos os usuários herdam) e auditar.
+
+-- Questão 48
+REVOKE 'leitor_hogwarts' FROM 'professor'@'localhost';
+DROP ROLE 'leitor_hogwarts';
